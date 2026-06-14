@@ -1,0 +1,33 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Xoodrip Content Intelligence — Python Dependencies
+#
+# Python version: 3.12.x
+# Install with:  pip install -r requirements.txt
+#
+# NOTE: CLIP must be installed from OpenAI's GitHub repo (not on PyPI):
+#   pip install git+https://github.com/openai/CLIP.git
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Web Framework ─────────────────────────────────────────────────────────────
+fastapi==0.128.0                # API framework
+uvicorn==0.40.0                 # ASGI server to run FastAPI
+python-multipart==0.0.21        # Required for FastAPI file/form uploads
+
+# ── Database ──────────────────────────────────────────────────────────────────
+SQLAlchemy==2.0.48              # ORM for SQLite (dev) / PostgreSQL (prod)
+
+# ── Machine Learning ──────────────────────────────────────────────────────────
+torch                   # PyTorch — backend for CLIP
+# CLIP is NOT on PyPI. Install separately:
+#   pip install git+https://github.com/openai/CLIP.git
+scikit-learn            # cosine_similarity + TF-IDF vectorizer
+
+# ── Media Processing ──────────────────────────────────────────────────────────
+Pillow            # Image loading for CLIP (PIL.Image)
+opencv-python        # Video frame extraction (cv2)
+
+# ── Numerics ──────────────────────────────────────────────────────────────────
+numpy                   # Array operations and embedding math
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest                   # Test runner (run: python -m pytest tests/ -v)

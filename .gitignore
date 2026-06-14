@@ -35,6 +35,12 @@ Thumbs.db
 *.log
 
 # --------------------
+# Local databases / test cache
+# --------------------
+*.db
+.pytest_cache/
+
+# --------------------
 # Jupyter notebooks
 # --------------------
 .ipynb_checkpoints/
