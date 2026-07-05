@@ -1,144 +1,347 @@
-# Xoodrip Content Intelligence Service
+# Xoodrip Content Intelligence
 
-This repository contains a **multimodal content intelligence microservice** for Xoodrip.
-It dynamically categorizes posts (text, images, videos) without predefined categories
-using online clustering, zero-shot domain classification, and exposes the functionality via secured APIs.
+A multimodal AI microservice that analyzes social media posts (text, images, videos) and automatically classifies them into domains and fine-grained categories using zero-shot learning.
 
----
+Built as the content intelligence engine for the **GrowinBharat** platform.
 
-## 🚀 Key Features
+## What It Does
 
-- **Dynamic Clustering:** Automatically creates new categories or updates existing ones using incremental mean clustering.
-- **Multimodal Support:** Embeds text, images, and videos (via frame sampling) into a unified 512-dimensional semantic space.
-- **Zero-Shot Domain Classification:** Uses OpenAI's **CLIP** model to classify content into 12 distinct domains (sports, bollywood, politics, tech, etc.) without training a custom classifier.
-- **Domain-Aware Gating:** Prevents posts from different domains (e.g., cricket and a tech startup) from ever merging into the same category, even if semantically similar.
-- **Persistence:** All learned categories and centroids are saved in a SQLite database (`xoodrip.db`), surviving server restarts.
-- **Auto-Naming:** Generates human-readable category names automatically using TF-IDF term extraction once a category has 3+ posts.
-- **Secure:** API key authentication for secure backend-to-backend communication.
+1. **Domain Classification** — Assigns each post to one of 12 broad domains (sports, bollywood, politics, tech, etc.) using zero-shot SigLIP inference.
+2. **Dynamic Categorization** — Groups similar posts into fine-grained categories within each domain using online cosine-similarity clustering.
+3. **Auto-Naming** — Generates human-readable category names (e.g., "Cricket & Ipl", "Budget & Ministry") from accumulated post texts using TF-IDF.
 
----
+> A single domain like **sports** can contain multiple categories — one for cricket, another for football, another for tennis — all discovered automatically from the content.
 
-## 🏗️ Architecture Overview
+## Tech Stack
 
-The system is built as a plug-and-play microservice:
+| Layer | Technology |
+|---|---|
+| **API Framework** | FastAPI (async) |
+| **Server** | Uvicorn (ASGI) |
+| **ML Model** | Google SigLIP `so400m-patch14-384` via Hugging Face Transformers |
+| **ML Runtime** | PyTorch |
+| **Embeddings** | 1152-dimensional L2-normalized vectors |
+| **Database** | MongoDB Atlas (async via Motor) |
+| **Config** | Pydantic Settings + `.env` |
+| **Text Features** | scikit-learn TF-IDF |
+| **Image Processing** | Pillow |
+| **Video Processing** | OpenCV |
+| **Testing** | pytest |
+| **Language** | Python 3.12+ |
 
-```text
-Xoodrip Backend  
-  │
-  ├── 1. POST /analyze/[text|image|video] (Protected by X-Api-Key)
-  │
-Content Intelligence Service
-  │
-  ├── 2. Embeddings (CLIP ViT-B/32) -> 512-dim vector
-  ├── 3. Domain Inference (Zero-shot CLIP comparison)
-  ├── 4. Online Clustering (Find nearest DB centroid or create new)
-  │
-  └── 5. Returns: { category_id, name, domain, similarity, is_new }
+## Supported Domains
+
+The zero-shot classifier covers 12 domains with no custom training data:
+
+| Domain | Domain | Domain |
+|---|---|---|
+| 🏏 sports | 🎬 bollywood | 🗳️ politics |
+| 🏛️ government | 💻 tech | 🚀 startup |
+| 🍔 food | ✈️ travel | 💪 fitness |
+| 👗 fashion | 😂 memes | 📦 general |
+
+## Architecture
+
+```
+GrowinBharat Backend
+    │
+    │  POST /analyze/text
+    │  POST /analyze/image
+    │  POST /analyze/video
+    │  Header: X-Api-Key
+    ▼
+FastAPI Content Intelligence Service
+    │
+    │  1. Convert input → SigLIP embedding (1152-d vector)
+    │  2. Classify domain via zero-shot prompt comparison
+    │  3. Load category centroids from MongoDB
+    │  4. Find nearest category (cosine similarity)
+    │  5. Domain gating — block cross-domain merges
+    │  6. Update existing category or create a new one
+    │  7. Auto-name category once 3+ posts are grouped
+    ▼
+Response:
+{
+  "category_id": "668f...",
+  "is_new": false,
+  "similarity": 0.82,
+  "domain": "sports",
+  "name": "Cricket & Ipl"
+}
 ```
 
----
+## Project Structure
 
-## 🧰 Tech Stack
+```
+app/
+  config.py              # Pydantic settings — reads .env
+  main.py                # FastAPI entry point + MongoDB lifespan
+  api/
+    analyze.py           # /analyze/text, /image, /video endpoints
+    auth.py              # API key authentication
+  db/
+    mongodb.py           # Motor async connection manager
+    model.py             # Category document helpers
+  ml/
+    embeddings.py        # SigLIP text/image/video embeddings
+    domain.py            # Zero-shot domain classifier
+    clustering.py        # Online category assignment (CategoryManager)
+    naming.py            # TF-IDF category naming
+    similarity.py        # Cosine similarity helper
 
-- **Framework:** FastAPI, Uvicorn
-- **Machine Learning:** PyTorch, OpenAI CLIP, scikit-learn
-- **Database:** SQLite (via SQLAlchemy ORM)
-- **Media Processing:** OpenCV (video frames), Pillow (images)
+.env                     # Secrets — MongoDB URI, API key (git-ignored)
+requirements.txt         # Python dependencies
+pytest.ini               # Pytest configuration
+```
 
----
+## Setup
 
-## ⚙️ Setup & Installation
+### 1. Clone and create a virtual environment
 
-### 1. Prerequisites
-- Python 3.12+
-- (Optional but recommended) A dedicated virtual environment
+```powershell
+git clone https://github.com/YashMittal1503/xoodrip-content-intelligence.git
+cd xoodrip-content-intelligence
 
-### 2. Install Dependencies
-Because OpenAI's CLIP model is not hosted on PyPI, you must install it directly from GitHub, followed by the rest of the dependencies:
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+macOS / Linux:
 
 ```bash
-# 1. Install CLIP directly from GitHub
-pip install git+https://github.com/openai/CLIP.git
+python -m venv .venv
+source .venv/bin/activate
+```
 
-# 2. Install all other pinned dependencies
+### 2. Install dependencies
+
+```bash
 pip install -r requirements.txt
 ```
 
----
+### 3. Configure environment variables
 
-## 🚀 Running the Service
+Create a `.env` file in the project root:
 
-Start the FastAPI development server:
+```env
+MONGO_URI=mongodb+srv://<username>:<password>@<cluster>.mongodb.net/
+MONGO_DB_NAME=xoodrip_intelligence
+XOODRIP_API_KEY=dev-secret-key
+```
+
+Replace `<username>`, `<password>`, and `<cluster>` with your MongoDB Atlas credentials.
+
+### 4. Start the server
 
 ```bash
 uvicorn app.main:app --reload
 ```
 
-The service will run at `http://localhost:8000`.
-- **Health Check:** `GET /health`
-- **Interactive API Docs (Swagger UI):** `http://localhost:8000/docs`
+The first start downloads the SigLIP model weights (~1.6 GB) from Hugging Face. Subsequent starts load from cache.
 
-### Authentication
-All `/analyze` endpoints require an API key passed in the headers.
-For local development, the fallback key is `dev-secret-key`. In production, set the environment variable:
-```bash
-export XOODRIP_API_KEY="your-secure-production-key"
+You should see:
+
+```
+⏳ Loading SigLIP model (google/siglip-so400m-patch14-384) on cpu...
+✅ SigLIP model loaded — embedding dimension: 1152
+⏳ Building domain embeddings...
+✅ Domain embeddings built for 12 domains
+✅ Connected to MongoDB Atlas — database: xoodrip_intelligence
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000
 ```
 
----
+### Useful Routes
 
-## 🔌 API Endpoints
+| Route | Description |
+|---|---|
+| `GET /` | Service status |
+| `GET /health` | Health check |
+| `GET /docs` | Swagger UI (interactive API docs) |
 
-All endpoints are `POST` and accept form data (`multipart/form-data` or `application/x-www-form-urlencoded`).
+## Authentication
 
-### Headers Required (All Endpoints)
+All `/analyze/*` endpoints require an API key header:
+
 ```http
 X-Api-Key: dev-secret-key
 ```
 
-### 1. Analyze Text
-`POST /analyze/text`
+The key is configured via `XOODRIP_API_KEY` in `.env`. For local development, it defaults to `dev-secret-key`.
 
-**Form Data:**
-- `text` (string, required): The content of the post.
-- `include_scores` (boolean, optional): Set to `true` to get raw CLIP confidence scores for all domains.
+## API Endpoints
 
-### 2. Analyze Image
-`POST /analyze/image`
+### `POST /analyze/text`
 
-**Form Data:**
-- `image` (file, required): The image file to upload.
-- `caption` (string, optional): Relevant text. If provided, the system uses a multimodal embedding (average of image + text).
-- `include_scores` (boolean, optional)
+Analyze a text post and assign it to a category.
 
-### 3. Analyze Video
-`POST /analyze/video`
+**Form fields:**
+- `text` (required) — the post content
 
-**Form Data:**
-- `video` (file, required): The video file (e.g., .mp4).
-- `caption` (string, optional): Relevant text.
-- `include_scores` (boolean, optional)
+**Query params:**
+- `include_scores` (optional, default `false`) — return per-domain confidence scores
 
-### Example Response:
-```json
-{
-  "category_id": 4,
-  "is_new": false,
-  "similarity": 0.82,
-  "domain": "sports",
-  "name": "cricket & ipl"
-}
+**Example:**
+
+```bash
+curl -X POST "http://localhost:8000/analyze/text?include_scores=true" \
+  -H "X-Api-Key: dev-secret-key" \
+  -F "text=Virat Kohli hits a century in IPL 2025"
 ```
 
 ---
 
-## 🧪 Testing
+### `POST /analyze/image`
 
-The project uses `pytest` for rigorous integration testing (verifying domain inference and score thresholds without requiring manual API calls).
+Analyze an uploaded image, optionally with a caption.
 
-To run the test suite:
+**Form fields:**
+- `image` (required) — image file
+- `caption` (optional) — text caption to combine with the image
+
+**Example:**
+
 ```bash
-python -m pytest tests/ -v
+curl -X POST "http://localhost:8000/analyze/image" \
+  -H "X-Api-Key: dev-secret-key" \
+  -F "image=@test_images/cricket.jpeg" \
+  -F "caption=Cricket match highlights"
 ```
 
-*Note: The first run will download the CLIP model weights (~350MB) if they are not already cached.*
+---
+
+### `POST /analyze/video`
+
+Analyze an uploaded video by sampling frames.
+
+**Form fields:**
+- `video` (required) — video file
+- `caption` (optional) — text caption
+
+**Example:**
+
+```bash
+curl -X POST "http://localhost:8000/analyze/video" \
+  -H "X-Api-Key: dev-secret-key" \
+  -F "video=@sample.mp4" \
+  -F "caption=Short video post"
+```
+
+## Response Format
+
+```json
+{
+  "category_id": "668fa1b2c3d4e5f6a7b8c9d0",
+  "is_new": false,
+  "similarity": 0.82,
+  "domain": "sports",
+  "name": "Cricket & Ipl"
+}
+```
+
+With `include_scores=true`:
+
+```json
+{
+  "category_id": "668fa1b2c3d4e5f6a7b8c9d0",
+  "is_new": true,
+  "similarity": 0.0,
+  "domain": "sports",
+  "name": null,
+  "domain_scores": {
+    "sports": 0.31,
+    "bollywood": 0.22,
+    "government": 0.18,
+    "politics": 0.16,
+    "...": "..."
+  }
+}
+```
+
+## How Categorization Works
+
+```
+Input Post
+    │
+    ▼
+┌─────────────────────────┐
+│  SigLIP Embedding       │  Text, image, or video → 1152-d vector
+└─────────┬───────────────┘
+          │
+          ▼
+┌─────────────────────────┐
+│  Domain Classification  │  Compare against 12 pre-computed domain
+│  (zero-shot)            │  centroids + keyword boosting
+└─────────┬───────────────┘
+          │
+          ▼
+┌─────────────────────────┐
+│  Category Matching      │  Load centroids from MongoDB,
+│  (cosine similarity)    │  find best match within the same domain
+└─────────┬───────────────┘
+          │
+    ┌─────┴──────┐
+    │            │
+  Match?      No match
+    │            │
+    ▼            ▼
+  Update      Create new
+  centroid     category
+  & count      in MongoDB
+    │            │
+    └─────┬──────┘
+          │
+          ▼
+   Return result JSON
+```
+
+**Key mechanisms:**
+
+- **Domain gating** — A cricket post will never merge into a Bollywood category, even if embeddings are close.
+- **Dynamic threshold** — Sports categories use a looser threshold (0.70 vs 0.78) because sports posts vary more. Mature categories (3+ posts) use a stricter threshold.
+- **Incremental centroid** — `new = (old × count + new_embedding) / (count + 1)`. No need to store all historical embeddings.
+- **Auto-naming** — Once a category accumulates 3+ texts, TF-IDF extracts the top keywords and joins them (e.g., "Cricket & Ipl & Match").
+
+## MongoDB Document Schema
+
+Categories are stored in the `categories` collection:
+
+```json
+{
+  "_id": ObjectId("668fa1b2c3d4e5f6a7b8c9d0"),
+  "name": "Cricket & Ipl",
+  "domain": "sports",
+  "count": 5,
+  "centroid": [0.012, -0.034, 0.056, ...],
+  "texts": [
+    "Virat Kohli hits a century in IPL",
+    "India wins cricket world cup",
+    "..."
+  ]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `_id` | ObjectId | Auto-generated unique identifier |
+| `name` | string or null | Human-readable name, generated after 3+ posts |
+| `domain` | string | Broad domain (sports, tech, etc.) |
+| `count` | integer | Number of posts assigned to this category |
+| `centroid` | array of floats | Average SigLIP embedding (1152 values) |
+| `texts` | array of strings | Sample post texts for naming |
+
+## Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `MONGO_URI` | `mongodb://localhost:27017` | MongoDB connection string |
+| `MONGO_DB_NAME` | `xoodrip_intelligence` | Database name |
+| `XOODRIP_API_KEY` | `dev-secret-key` | API key for `/analyze/*` routes |
+
+All variables are read from `.env` via Pydantic Settings.
+
+## GitHub
+
+```
+https://github.com/YashMittal1503/xoodrip-content-intelligence.git
+```

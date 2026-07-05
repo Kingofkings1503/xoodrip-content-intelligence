@@ -2,32 +2,42 @@
 main.py
 -------
 The entry point of the FastAPI application.
+
+WHAT CHANGED vs. the old version:
+  - Before: `Base.metadata.create_all(engine)` created SQLite tables on startup
+  - Now:    `connect_to_mongo()` connects to MongoDB Atlas on startup
+            `close_mongo()` disconnects on shutdown
+  - Removed all SQLAlchemy imports
+  - Added MongoDB lifecycle management
+
+NOTE ABOUT MONGODB:
+  Unlike SQLite, MongoDB does NOT require you to create tables/collections
+  beforehand. When you first insert a document into a collection, MongoDB
+  creates the collection automatically. So there's no equivalent of
+  `CREATE TABLE` — we just need to connect.
 """
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.db.database import engine, Base
+from app.db.mongodb import connect_to_mongo, close_mongo
 from app.api.analyze import router as analyze_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Code here runs ONCE when the server starts up.
+    Code here runs ONCE when the server starts up and shuts down.
 
-    `Base.metadata.create_all(engine)` inspects every class that inherits
-    from Base (i.e., our Category model) and creates the matching SQL table
-    in xoodrip.db if it doesn't already exist.
-
-    Think of it like: "Before we open for business, make sure the filing
-    cabinet (database) has the right folders (tables) in it."
+    Startup:  Connect to MongoDB Atlas
+    Shutdown: Close the connection cleanly
     """
-    Base.metadata.create_all(bind=engine)
-    print("✅ Database tables created / verified.")
+    # ── Startup ──
+    await connect_to_mongo()
     yield
-    # (anything after `yield` runs on shutdown — nothing needed here)
+    # ── Shutdown ──
+    await close_mongo()
 
 
 # Create the FastAPI app, wired to our lifespan startup handler
@@ -49,7 +59,7 @@ app.add_middleware(
 
 
 @app.get("/")
-def root():
+async def root():
     return {
         "status": "ok",
         "service": "Content Intelligence Service",
@@ -57,7 +67,7 @@ def root():
 
 
 @app.get("/health")
-def health_check():
+async def health_check():
     return {"healthy": True}
 
 

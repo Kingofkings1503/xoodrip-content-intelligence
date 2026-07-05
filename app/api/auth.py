@@ -1,18 +1,23 @@
-import os
+"""
+auth.py
+-------
+API key authentication for protecting /analyze/* endpoints.
+
+WHAT CHANGED:
+  - Before: Used os.getenv() directly with a hardcoded fallback
+  - Now:    Uses settings.XOODRIP_API_KEY from our centralized config
+            (which reads from .env automatically)
+"""
+
 from fastapi import Header, HTTPException, status
 from typing import Optional
 
-# Load API key from environment
-API_KEY = os.getenv("XOODRIP_API_KEY")
-
-if not API_KEY:
-    # Fallback for local development ONLY
-    API_KEY = "dev-secret-key"
+from app.config import settings
 
 
 def verify_api_key(x_api_key: Optional[str] = Header(None)):
     """
-    Dependency to verify API key from request headers
+    Dependency to verify API key from request headers.
     """
     if x_api_key is None:
         raise HTTPException(
@@ -20,7 +25,7 @@ def verify_api_key(x_api_key: Optional[str] = Header(None)):
             detail="API key missing"
         )
 
-    if x_api_key != API_KEY:
+    if x_api_key != settings.XOODRIP_API_KEY:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid API key"
