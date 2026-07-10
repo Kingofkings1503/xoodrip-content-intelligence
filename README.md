@@ -6,7 +6,7 @@ Built as the content intelligence engine for the **GrowinBharat** platform.
 
 ## What It Does
 
-1. **Domain Classification** — Assigns each post to one of 12 broad domains (sports, bollywood, politics, tech, etc.) using zero-shot SigLIP inference.
+1. **Domain Classification** — Assigns each post to one of 13 broad domains (sports, bollywood, politics, tech, etc.) using zero-shot SigLIP inference.
 2. **Dynamic Categorization** — Groups similar posts into fine-grained categories within each domain using online cosine-similarity clustering.
 3. **Auto-Naming** — Generates human-readable category names (e.g., "Cricket & Ipl", "Budget & Ministry") from accumulated post texts using TF-IDF.
 
@@ -31,14 +31,15 @@ Built as the content intelligence engine for the **GrowinBharat** platform.
 
 ## Supported Domains
 
-The zero-shot classifier covers 12 domains with no custom training data:
+The zero-shot classifier covers 13 domains with no custom training data:
 
 | Domain | Domain | Domain |
 |---|---|---|
 | 🏏 sports | 🎬 bollywood | 🗳️ politics |
 | 🏛️ government | 💻 tech | 🚀 startup |
 | 🍔 food | ✈️ travel | 💪 fitness |
-| 👗 fashion | 😂 memes | 📦 general |
+| 👗 fashion | 😂 memes | 📺 tv_series |
+| 📦 general | | |
 
 ## Architecture
 
@@ -88,10 +89,11 @@ app/
     clustering.py        # Online category assignment (CategoryManager)
     naming.py            # TF-IDF category naming
     similarity.py        # Cosine similarity helper
+    sample.mp4           # Sample video used for testing
+  utils/                 # Helper utilities (currently empty)
 
 .env                     # Secrets — MongoDB URI, API key (git-ignored)
-requirements.txt         # Python dependencies
-pytest.ini               # Pytest configuration
+requirements.txt         # Python dependencies (includes pytest)
 ```
 
 ## Setup
@@ -142,10 +144,10 @@ The first start downloads the SigLIP model weights (~1.6 GB) from Hugging Face. 
 You should see:
 
 ```
-⏳ Loading SigLIP model (google/siglip-so400m-patch14-384) on cpu...
-✅ SigLIP model loaded — embedding dimension: 1152
-⏳ Building domain embeddings...
-✅ Domain embeddings built for 12 domains
+[INFO] Loading SigLIP model (google/siglip-so400m-patch14-384) on cpu...
+[SUCCESS] SigLIP model loaded — embedding dimension: 1152
+[INFO] Building domain embeddings...
+[SUCCESS] Domain embeddings built for 13 domains
 ✅ Connected to MongoDB Atlas — database: xoodrip_intelligence
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8000
@@ -199,10 +201,13 @@ Analyze an uploaded image, optionally with a caption.
 - `image` (required) — image file
 - `caption` (optional) — text caption to combine with the image
 
+**Query params:**
+- `include_scores` (optional, default `false`) — return per-domain confidence scores
+
 **Example:**
 
 ```bash
-curl -X POST "http://localhost:8000/analyze/image" \
+curl -X POST "http://localhost:8000/analyze/image?include_scores=true" \
   -H "X-Api-Key: dev-secret-key" \
   -F "image=@test_images/cricket.jpeg" \
   -F "caption=Cricket match highlights"
@@ -218,12 +223,15 @@ Analyze an uploaded video by sampling frames.
 - `video` (required) — video file
 - `caption` (optional) — text caption
 
+**Query params:**
+- `include_scores` (optional, default `false`) — return per-domain confidence scores
+
 **Example:**
 
 ```bash
-curl -X POST "http://localhost:8000/analyze/video" \
+curl -X POST "http://localhost:8000/analyze/video?include_scores=true" \
   -H "X-Api-Key: dev-secret-key" \
-  -F "video=@sample.mp4" \
+  -F "video=@app/ml/sample.mp4" \
   -F "caption=Short video post"
 ```
 
@@ -270,7 +278,7 @@ Input Post
           │
           ▼
 ┌─────────────────────────┐
-│  Domain Classification  │  Compare against 12 pre-computed domain
+│  Domain Classification  │  Compare against 13 pre-computed domain
 │  (zero-shot)            │  centroids + keyword boosting
 └─────────┬───────────────┘
           │

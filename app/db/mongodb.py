@@ -33,6 +33,7 @@ HOW THIS FILE WORKS:
 """
 
 from motor.motor_asyncio import AsyncIOMotorClient
+import certifi
 from app.config import settings
 
 # These start as None and are set when the server starts up
@@ -51,7 +52,7 @@ async def connect_to_mongo():
 
     # Create the client — Motor handles connection pooling automatically
     # (it keeps a pool of connections open so we don't reconnect every request)
-    client = AsyncIOMotorClient(settings.MONGO_URI)
+    client = AsyncIOMotorClient(settings.MONGO_URI, tlsCAFile=certifi.where())
 
     # Select our database — if it doesn't exist, MongoDB creates it
     # automatically when we first insert data (no CREATE DATABASE needed!)

@@ -114,6 +114,11 @@ def embed_image(image_path: str) -> np.ndarray:
         embedding = model.get_image_features(
             pixel_values=inputs["pixel_values"],
         )
+        if hasattr(embedding, "pooler_output"):
+            embedding = embedding.pooler_output
+        elif not isinstance(embedding, torch.Tensor) and hasattr(embedding, "last_hidden_state"):
+            embedding = embedding.last_hidden_state.mean(dim=1)
+            
         embedding = F.normalize(embedding, p=2, dim=-1)
 
     return embedding.cpu().numpy()[0]                     # (1152,)
@@ -152,6 +157,11 @@ def embed_video(video_path: str, frame_interval: int = 30) -> np.ndarray:
                 emb = model.get_image_features(
                     pixel_values=inputs["pixel_values"],
                 )
+                if hasattr(emb, "pooler_output"):
+                    emb = emb.pooler_output
+                elif not isinstance(emb, torch.Tensor) and hasattr(emb, "last_hidden_state"):
+                    emb = emb.last_hidden_state.mean(dim=1)
+                    
                 emb = F.normalize(emb, p=2, dim=-1)
 
             frame_embeddings.append(emb.cpu().numpy()[0])

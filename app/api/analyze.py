@@ -7,11 +7,10 @@ WHAT CHANGED vs. the old version:
   - All endpoints are now `async def` (were `def`)
     → Required because Motor (MongoDB driver) uses `await` for queries
   - `db: Session = Depends(get_db)` → `db = Depends(get_db)`
-    → No more SQLAlchemy Session, just a Motor database handle
   - `CategoryManager(db=db)` now uses Motor instead of SQLAlchemy
   - `manager.assign_category(...)` is now awaited (it's async)
 
-WHY ASYNC? (for Yash)
+WHY ASYNC?
   - "async def" means the function can "pause" while waiting for I/O
     (like database queries) without blocking the entire server.
   - "await" means "pause here until this finishes, but let other
@@ -43,14 +42,14 @@ async def analyze_text(
     """
     Analyze a piece of text and assign it to a category.
 
-    Set ?include_scores=true to also receive a breakdown of how confident
+    Set include_scores=true to also receive a breakdown of how confident
     the model is for every domain (useful for debugging).
     """
     manager = CategoryManager(db=db)
     embedding = embed_text(text)
     result = await manager.assign_category(embedding, text)
     if include_scores:
-        result["domain_scores"] = get_domain_scores(embedding)
+        result["domain_scores"] = get_domain_scores(embedding, text)
     return result
 
 
@@ -76,12 +75,14 @@ async def analyze_image(
         if caption:
             embedding = embed_multimodal(image_path, caption)
             result = await manager.assign_category(embedding, caption)
+            text_for_scores = caption
         else:
             embedding = embed_image(image_path)
             result = await manager.assign_category(embedding, image.filename)
+            text_for_scores = image.filename
 
         if include_scores:
-            result["domain_scores"] = get_domain_scores(embedding)
+            result["domain_scores"] = get_domain_scores(embedding, text_for_scores)
     finally:
         os.remove(image_path)
 
@@ -107,9 +108,10 @@ async def analyze_video(
     try:
         manager = CategoryManager(db=db)
         embedding = embed_video(video_path)
-        result = await manager.assign_category(embedding, caption if caption else video.filename)
+        text_for_scores = caption if caption else video.filename
+        result = await manager.assign_category(embedding, text_for_scores)
         if include_scores:
-            result["domain_scores"] = get_domain_scores(embedding)
+            result["domain_scores"] = get_domain_scores(embedding, text_for_scores)
     finally:
         os.remove(video_path)
 

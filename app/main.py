@@ -3,18 +3,8 @@ main.py
 -------
 The entry point of the FastAPI application.
 
-WHAT CHANGED vs. the old version:
-  - Before: `Base.metadata.create_all(engine)` created SQLite tables on startup
-  - Now:    `connect_to_mongo()` connects to MongoDB Atlas on startup
-            `close_mongo()` disconnects on shutdown
-  - Removed all SQLAlchemy imports
-  - Added MongoDB lifecycle management
-
-NOTE ABOUT MONGODB:
-  Unlike SQLite, MongoDB does NOT require you to create tables/collections
-  beforehand. When you first insert a document into a collection, MongoDB
-  creates the collection automatically. So there's no equivalent of
-  `CREATE TABLE` — we just need to connect.
+connect_to_mongo() : connects to MongoDB Atlas on startup
+close_mongo() : disconnects on shutdown
 """
 
 from contextlib import asynccontextmanager

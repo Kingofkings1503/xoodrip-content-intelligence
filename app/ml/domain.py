@@ -1,13 +1,7 @@
 """
 domain.py — Zero-shot SigLIP-based domain classifier.
-
-WHAT CHANGED vs. the old CLIP version:
-  - Replaced `clip.tokenize()` with `processor(text=...)`
-  - Replaced `model.encode_text()` with `model.get_text_features()`
-  - Embedding dimension: 512 → 1152
-  - Confidence threshold recalibrated for SigLIP's score distribution
-  - Same domain labels, keyword boosts, and public API
-
+Embedding dimension: 1152
+  
 Instead of brittle keyword matching, we embed each domain as a set of
 descriptive natural-language prompts and compare incoming embeddings
 against them via cosine similarity.  SigLIP's shared text-image embedding
@@ -20,6 +14,7 @@ Domains supported:
 import numpy as np
 import torch
 import torch.nn.functional as F
+import re
 
 # ── Re-use the already-loaded SigLIP model from embeddings.py ────────────────
 # Importing model, processor, and DEVICE here avoids loading SigLIP a second
@@ -110,6 +105,12 @@ DOMAIN_LABELS: dict[str, list[str]] = {
         "a relatable funny situation",
         "trending meme or internet humor",
     ],
+    "tv_series": [
+        "a scene from a US television series or sitcom",
+        "actors in a comedy TV show",
+        "a still from an episode of a television series",
+        "television network show promotion",
+    ],
     "general": [
         "a miscellaneous or unrelated topic",
         "everyday life or random content",
@@ -117,15 +118,11 @@ DOMAIN_LABELS: dict[str, list[str]] = {
 }
 
 # ── Confidence threshold ──────────────────────────────────────────────────────
-# SigLIP's sigmoid-based scores have a different magnitude than CLIP's softmax.
-# SigLIP scores tend to be slightly lower overall but with better separation
-# between correct and incorrect domains. We lower the threshold to 0.18
-# (from CLIP's 0.22) to account for this.
-CONFIDENCE_THRESHOLD = 0.18
+# We now use a dynamic relative threshold (e.g. must be 2x greater than 'general' score)
+# instead of a hardcoded absolute threshold.
 
 # ── Keyword booster ───────────────────────────────────────────────────────────
-# SigLIP is better at domain separation than CLIP, but keyword boosting
-# still helps for closely-related Indian domains where training data overlap.
+# keyword boosting helps for closely-related Indian domains where training data overlaps
 KEYWORD_BOOSTS: dict[str, list[str]] = {
     "sports": [
         # Cricket
@@ -169,6 +166,10 @@ KEYWORD_BOOSTS: dict[str, list[str]] = {
     "memes": [
         "meme", "funny", "lol", "rofl", "viral", "humor",
         "relatable", "comedy", "joke", "parody",
+    ],
+    "tv_series": [
+        "tv series", "sitcom", "episode", "season", "television",
+        "show", "modern family", "netflix", "hbo",
     ],
     "startup": [
         "startup", "funding", "series a", "series b", "seed round",
@@ -301,8 +302,10 @@ def infer_domain_from_embedding(embedding: np.ndarray, text: str = "") -> str:
     Returns:
         Domain name string.
     """
-    # Step 1: base SigLIP cosine scores
-    scores: dict[str, float] = {
+    # Step 1: raw cosine similarities (both sides are L2-normalised, so
+    # dot product == cosine similarity).  We use these for RANKING because
+    # they preserve relative differences, unlike sigmoid which saturates.
+    raw_scores: dict[str, float] = {
         domain: float(np.dot(embedding, centroid))
         for domain, centroid in _DOMAIN_EMBEDDINGS.items()
     }
@@ -312,35 +315,63 @@ def infer_domain_from_embedding(embedding: np.ndarray, text: str = "") -> str:
     if text:
         text_lower = text.lower()
         for domain, keywords in KEYWORD_BOOSTS.items():
-            if any(kw in text_lower for kw in keywords):
-                scores[domain] = scores.get(domain, 0.0) + KEYWORD_BOOST_DELTA
+            for kw in keywords:
+                # Use word boundaries (\b) so "mp" doesn't match inside ".mp4"
+                if re.search(rf'\b{re.escape(kw)}\b', text_lower):
+                    raw_scores[domain] = raw_scores.get(domain, 0.0) + KEYWORD_BOOST_DELTA
+                    break
 
     # Step 3: pick the highest scoring domain
-    best_domain = max(scores, key=lambda d: scores[d])
-    best_score = scores[best_domain]
+    best_domain = max(raw_scores, key=lambda d: raw_scores[d])
+    best_score = raw_scores[best_domain]
 
-    # Step 4: confidence floor — if nothing matches well, return "general"
-    if best_score < CONFIDENCE_THRESHOLD:
-        return "general"
+    # Step 4: fall back to "general" only if the best specific domain
+    # doesn't beat "general" by a meaningful margin (0.02 in cosine space)
+    if best_domain != "general":
+        general_score = raw_scores.get("general", 0.0)
+        if best_score < general_score + 0.02:
+            return "general"
 
     return best_domain
 
 
-def get_domain_scores(embedding: np.ndarray) -> dict[str, float]:
+
+def get_domain_scores(embedding: np.ndarray, text: str = "") -> dict[str, float]:
     """
-    Return cosine similarity scores for ALL domains.
+    Return true Sigmoid probability scores for ALL domains.
 
     Useful for debugging, logging, or returning confidence metadata
     in the API response.
 
     Args:
         embedding: L2-normalised (1152,) SigLIP embedding.
+        text: Optional text to apply keyword boosting to match inference.
 
     Returns:
-        Dict of {domain_name: similarity_score}, sorted by score descending.
+        Dict of {domain_name: probability_score}, sorted by score descending.
     """
-    scores = {
+    raw_scores = {
         domain: float(np.dot(embedding, centroid))
         for domain, centroid in _DOMAIN_EMBEDDINGS.items()
     }
+
+    # Apply keyword boost on raw scores before softmax
+    if text:
+        text_lower = text.lower()
+        for domain, keywords in KEYWORD_BOOSTS.items():
+            for kw in keywords:
+                if re.search(rf'\b{re.escape(kw)}\b', text_lower):
+                    raw_scores[domain] = raw_scores.get(domain, 0.0) + KEYWORD_BOOST_DELTA
+                    break
+
+    # Convert to probabilities via softmax (temperature=0.1 sharpens the
+    # distribution so the winning domain stands out clearly)
+    domains = list(raw_scores.keys())
+    values = np.array([raw_scores[d] for d in domains])
+    temperature = 0.1
+    exp_values = np.exp((values - values.max()) / temperature)  # subtract max for numerical stability
+    probs = exp_values / exp_values.sum()
+
+    scores = {d: round(float(p), 4) for d, p in zip(domains, probs)}
     return dict(sorted(scores.items(), key=lambda x: x[1], reverse=True))
+
